@@ -43,7 +43,7 @@ func main() {
 
 	// heartbeat flush interval
 	var flush time.Duration
-	flag.DurationVar(&flush, "flush", 10.0*time.Second, "how often to update files")
+	flag.DurationVar(&flush, "flush", 60.0*time.Second, "how often to update files")
 
 	flag.Parse()
 

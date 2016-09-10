@@ -87,18 +87,20 @@ func (s Storage) Store(dir string, readings []Reading) error {
 	for k, v := range files {
 		path := filepath.Join(dir, k)
 
+		m := Readings([]Reading{}).Merge(v)
+
 		// import any existing readings
 		if _, err := os.Stat(path); err == nil {
 			if r, err := s.ReadFile(path); err != nil {
-				v = Readings(v).Merge(r)
+				m = Readings(m).Merge(r)
 			}
 		}
 
 		// get them in order
-		sort.Sort(Readings(v))
+		sort.Sort(Readings(m))
 
 		// write out the readings if they're different
-		if err := s.WriteFile(path, v); err != nil {
+		if err := s.WriteFile(path, m); err != nil {
 			return err
 		}
 	}
@@ -127,6 +129,8 @@ func (s Storage) WriteFile(path string, readings []Reading) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
+	defer os.Chmod(path, 0644)
+
 	f, err := ioutil.TempFile(filepath.Dir(path), tmpReadingPrefix)
 	if err != nil {
 		return err
