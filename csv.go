@@ -69,7 +69,11 @@ func (c Csv) Write(wr io.Writer, rr []Reading) error {
 
 	data := [][]string{}
 	for _, r := range rr {
-		data = append(data, []string{r.Date(), r.Source, strconv.FormatFloat(r.Value, 'f', dp, 64)})
+		b, err := r.Epoch.MarshalText()
+		if err != nil {
+			return err
+		}
+		data = append(data, []string{string(b), r.Source, strconv.FormatFloat(r.Value, 'f', dp, 64)})
 	}
 	if err := csv.NewWriter(wr).WriteAll(data); err != nil {
 		return err
