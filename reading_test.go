@@ -1,139 +1,153 @@
-package geomag
+package raw
 
 import (
-	"io/ioutil"
-	"math"
-	"os"
 	"testing"
 	"time"
 )
 
-func TestReading_Scale(t *testing.T) {
-	var readings = []Reading{
-		{"", time.Now(), -1.0},
-		{"", time.Now(), 0.0},
-		{"", time.Now(), 1.0},
-	}
-
-	var scales = []float64{1.0, -1.0, 2.0, -2.0}
-
-	for _, s := range scales {
-		t.Logf("checking scale: %g", s)
-		scaled := Readings(readings).Scale(s)
-		if len(scaled) != len(readings) {
-			t.Fatalf("invalid scaled length")
-		}
-		for i, r := range readings {
-			if math.Abs(s*r.Value-scaled[i].Value) > 1.0e-09 {
-				t.Errorf("invalid scaling %d: %s <= %s", i, r.String(), scaled[i].String())
-			}
-		}
-	}
-
-}
-
-func TestReading_Merge(t *testing.T) {
-	now := time.Now()
-
-	var set1 = []Reading{
-		{"a", now.Add(0 * time.Second), 0.0},
-		{"a", now.Add(1 * time.Second), 1.0},
-		{"a", now.Add(2 * time.Second), 2.0},
-	}
-
-	var set2 = []Reading{
-		{"a", now.Add(2 * time.Second), 2.0},
-		{"a", now.Add(3 * time.Second), 3.0},
-		{"a", now.Add(4 * time.Second), 4.0},
-		{"a", now.Add(5 * time.Second), 5.0},
-	}
-
-	var set3 = []Reading{
-		{"b", now.Add(0 * time.Second), 0.0},
-		{"b", now.Add(1 * time.Second), 1.0},
-		{"b", now.Add(2 * time.Second), 2.0},
-	}
-
-	m1 := Readings(set1).Merge(set1)
-	if len(m1) != len(set1) {
-		t.Error("unable to merge set with itself")
-	}
-
-	m2 := Readings(set1).Merge(set2)
-	if len(m2) != len(set1)+len(set2)-1 {
-		t.Error("unable to merge sets")
-	}
-	m3 := Readings(set1).Merge(set3)
-	if len(m3) != len(set1)+len(set3) {
-		t.Error("unable to merge different sets")
-	}
-
-}
-
-func TestReading_File(t *testing.T) {
+func TestReading_Keys(t *testing.T) {
+	at := time.Date(2010, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	var tests = []struct {
-		f string
-		b [2]float64
-		n int
+		r Reading
+		k string
 	}{
 		{
-			"testdata/2016.215.04.NZ_APIM_50_LFZ.csv",
-			[2]float64{-41221, -37449},
-			3600,
+			Reading{"a", at, 1.0},
+			"a:2010-01-01T00:00:00Z",
+		}, {
+			Reading{"b", at, 1.0},
+			"b:2010-01-01T00:00:00Z",
+		},
+		{
+			Reading{"c", at.Add(time.Second), 1.0},
+			"c:2010-01-01T00:00:01Z",
+		},
+		{
+			Reading{"d", at.Add(time.Second), 1.0},
+			"d:2010-01-01T00:00:01Z",
 		},
 	}
 
 	for _, x := range tests {
-		t.Logf("checking file %s", x.f)
-
-		f, err := os.OpenFile(x.f, os.O_RDONLY, 0)
-		if err != nil {
-			t.Fatal(err)
+		if x.r.Key() != x.k {
+			t.Errorf("unable to match key: %s != %s", x.r.Key(), x.k)
 		}
-		defer f.Close()
-
-		var r Readings
-		if err := r.Read(f); err != nil {
-			t.Fatal(err)
-		}
-
-		if len(r) != x.n {
-			t.Errorf("invalid number or records read for %s, expected %d found %d", x.f, x.n, len(r))
-		}
-
-		var min, max float64
-		for i, v := range r {
-			if i == 0 || min > v.Value {
-				min = v.Value
-			}
-			if i == 0 || max < v.Value {
-				max = v.Value
-			}
-		}
-
-		if len(r) > 0 {
-			if math.Abs(min-x.b[0]) > 1.0e-9 {
-				t.Errorf("invalid minimum record value for %s, expected %g found %g", x.f, x.b[0], min)
-			}
-			if math.Abs(max-x.b[1]) > 1.0e-9 {
-				t.Errorf("invalid maximum record value for %s, expected %g found %g", x.f, x.b[1], max)
-			}
-		}
-		tf, err := ioutil.TempFile("", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer os.Remove(tf.Name())
-		if err := Readings(r).Write(tf, -1); err != nil {
-			t.Fatal(err)
-		}
-		if err := tf.Close(); err != nil {
-			t.Fatal(err)
-		}
-		if !equalFileContents(tf.Name(), x.f) {
-			t.Errorf("unable to recover file exactly: %s", x.f)
-		}
-
 	}
+
+}
+
+func TestReading_Strings(t *testing.T) {
+	at := time.Date(2010, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	var tests = []struct {
+		r Reading
+		s string
+	}{
+		{
+			// merge itself
+			Reading{"a", at, 1.0},
+			"a 2010-01-01T00:00:00Z 1",
+		}, {
+			Reading{"b", at, 1.0},
+			"b 2010-01-01T00:00:00Z 1",
+		},
+		{
+			Reading{"c", at.Add(time.Second), 1.0},
+			"c 2010-01-01T00:00:01Z 1",
+		},
+		{
+			Reading{"d", at.Add(time.Second), 2.0},
+			"d 2010-01-01T00:00:01Z 2",
+		},
+	}
+
+	for _, x := range tests {
+		if x.r.String() != x.s {
+			t.Errorf("unable to match string: %s != %s", x.r.String(), x.s)
+		}
+	}
+
+}
+
+func TestReading_Less(t *testing.T) {
+	at := time.Date(2010, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	var tests = []struct {
+		a, b Reading
+		l    bool
+	}{
+		{
+			Reading{"a", at, 1.0},
+			Reading{"b", at, 1.0},
+			true,
+		}, {
+			Reading{"a", at, 1.0},
+			Reading{"a", at, 1.0},
+			false,
+		}, {
+			Reading{"a", at.Add(time.Second), 1.0},
+			Reading{"a", at, 1.0},
+			false,
+		}, {
+			Reading{"a", at, 1.0},
+			Reading{"a", at.Add(time.Second), 1.0},
+			true,
+		},
+	}
+
+	for _, x := range tests {
+		if x.a.Less(x.b) != x.l {
+			if x.l {
+				t.Errorf("reading %s is not less than %s", x.a.Key(), x.b.Key())
+			} else {
+				t.Errorf("reading %s is less than %s", x.a.Key(), x.b.Key())
+			}
+		}
+	}
+
+}
+
+func TestReading_Equal(t *testing.T) {
+	at := time.Date(2010, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	var tests = []struct {
+		a, b Reading
+		l    bool
+	}{
+		{
+			Reading{"a", at, 1.0},
+			Reading{"b", at, 1.0},
+			true,
+		}, {
+			Reading{"a", at, 1.0},
+			Reading{"a", at.Add(time.Second), 2.0},
+			true,
+		}, {
+			Reading{"a", at, 1.0},
+			Reading{"a", at, 1.0},
+			false,
+		},
+		{
+			Reading{"a", at.Add(time.Second), 2.0},
+			Reading{"a", at, 1.0},
+			false,
+		},
+		{
+			Reading{"b", at.Add(time.Second), 2.0},
+			Reading{"a", at, 1.0},
+			false,
+		},
+	}
+
+	for _, x := range tests {
+		if x.a.Less(x.b) != x.l {
+			if x.l {
+				t.Errorf("reading %s is not equal to %s", x.a.Key(), x.b.Key())
+			} else {
+				t.Errorf("reading %s is equal to %s", x.a.Key(), x.b.Key())
+			}
+		}
+	}
+
 }

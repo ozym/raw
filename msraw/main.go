@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/ozym/geomag"
+	"github.com/ozym/raw"
 )
 
 func main() {
@@ -19,34 +19,32 @@ func main() {
 	var scale float64
 	flag.Float64Var(&scale, "scale", 1.0, "stream scale factor")
 
+	var offset float64
+	flag.Float64Var(&offset, "offset", 0.0, "stream offset factor")
+
 	var dp int
 	flag.IntVar(&dp, "dp", -1, "decimal places")
 
 	flag.Parse()
 
-	mseed, err := geomag.NewMSeed(scale)
+	storage, err := raw.NewTemplate(tmpl)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	storage, err := geomag.NewStorage(tmpl, dp)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	var readings []geomag.Reading
+	var readings []raw.Reading
 	for _, infile := range flag.Args() {
 		switch infile {
 		case "-":
 			log.Println("reading: stdin")
-			r, err := mseed.ReadStream(os.Stdin)
+			r, err := raw.ReadMSeedStream(os.Stdin, offset, scale)
 			if err != nil {
 				log.Fatal(err)
 			}
 			readings = append(readings, r...)
 		default:
 			log.Printf("reading: %s", infile)
-			r, err := mseed.ReadFile(infile)
+			r, err := raw.ReadMSeedFile(infile, offset, scale)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -55,7 +53,7 @@ func main() {
 	}
 
 	log.Printf("storing %d readings: %s", len(readings), dir)
-	if err := storage.Store(dir, readings); err != nil {
+	if err := raw.Store(dir, raw.NewCsv(dp), storage.Execute, readings); err != nil {
 		log.Fatal(err)
 	}
 }

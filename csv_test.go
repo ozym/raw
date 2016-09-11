@@ -1,28 +1,37 @@
 package raw
 
 import (
+	"bytes"
+	"io/ioutil"
 	"math"
 	"testing"
 )
 
-func TestMSeed_File(t *testing.T) {
+func TestCsv_File(t *testing.T) {
 
 	var tests = []struct {
+		c ReadWriter
 		f string
 		b [2]float64
 		n int
 	}{
 		{
-			"testdata/NZ.APIM.50.LFZ.D.2016.215",
-			[2]float64{-55042, -29273},
-			83955,
+			Csv{},
+			"testdata/2016.215.04.NZ_APIM_50_LFZ.csv",
+			[2]float64{-41221, -37449},
+			3600,
 		},
 	}
 
 	for _, x := range tests {
 		t.Logf("checking file %s", x.f)
 
-		r, err := ReadMSeedFile(x.f, 0.0, 1.0)
+		raw, err := ioutil.ReadFile(x.f)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r, err := Read(bytes.NewBuffer(raw), x.c)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -48,6 +57,15 @@ func TestMSeed_File(t *testing.T) {
 			if math.Abs(max-x.b[1]) > 1.0e-9 {
 				t.Errorf("invalid maximum record value for %s, expected %g found %g", x.f, x.b[1], max)
 			}
+		}
+
+		var buf bytes.Buffer
+		if err := Write(&buf, x.c, r); err != nil {
+			t.Fatal(err)
+		}
+
+		if !bytes.Equal(raw, buf.Bytes()) {
+			t.Error("encoded and decoded record data should be the same: %s", x.f)
 		}
 
 	}

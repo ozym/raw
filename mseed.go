@@ -1,7 +1,6 @@
-package geomag
+package raw
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"time"
@@ -9,20 +8,7 @@ import (
 	"github.com/GeoNet/mseed"
 )
 
-type MSeed struct {
-	Scale float64
-}
-
-func NewMSeed(scale float64) (*MSeed, error) {
-	if scale == 0.0 {
-		return nil, fmt.Errorf("scale cannot be zero")
-	}
-	return &MSeed{
-		Scale: scale,
-	}, nil
-}
-
-func (m MSeed) DecodeBuffer(buf []byte) ([]Reading, error) {
+func DecodeMSeedBuffer(buf []byte, offset, scale float64) ([]Reading, error) {
 	var readings []Reading
 
 	msr := mseed.NewMSRecord()
@@ -41,7 +27,7 @@ func (m MSeed) DecodeBuffer(buf []byte) ([]Reading, error) {
 			readings = append(readings, Reading{
 				Source: msr.SrcName(0),
 				Epoch:  msr.Starttime().Add(time.Duration(n) * dt),
-				Value:  m.Scale * float64(s),
+				Value:  offset + scale*float64(s),
 			})
 		}
 	}
@@ -49,7 +35,7 @@ func (m MSeed) DecodeBuffer(buf []byte) ([]Reading, error) {
 	return readings, nil
 }
 
-func (m MSeed) ReadStream(rd io.Reader) ([]Reading, error) {
+func ReadMSeedStream(rd io.Reader, offset, scale float64) ([]Reading, error) {
 
 	var readings []Reading
 
@@ -62,7 +48,7 @@ func (m MSeed) ReadStream(rd io.Reader) ([]Reading, error) {
 		if n, _ := io.ReadFull(rd, buf); n != len(buf) {
 			break
 		}
-		r, err := m.DecodeBuffer(buf)
+		r, err := DecodeMSeedBuffer(buf, offset, scale)
 		if err != nil {
 			return nil, err
 		}
@@ -73,7 +59,7 @@ func (m MSeed) ReadStream(rd io.Reader) ([]Reading, error) {
 	return readings, nil
 }
 
-func (m MSeed) ReadFile(path string) ([]Reading, error) {
+func ReadMSeedFile(path string, offset, scale float64) ([]Reading, error) {
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -81,7 +67,7 @@ func (m MSeed) ReadFile(path string) ([]Reading, error) {
 	}
 	defer f.Close()
 
-	r, err := m.ReadStream(f)
+	r, err := ReadMSeedStream(f, offset, scale)
 	if err != nil {
 		return nil, err
 	}

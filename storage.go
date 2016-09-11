@@ -1,149 +1,114 @@
-package geomag
+package raw
 
 import (
 	"bytes"
-	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"sort"
-	"text/template"
-	"time"
 )
 
-const tmpReadingPrefix = ".xxxx"
-
-func fileContents(f string) ([]byte, error) {
-	if _, err := os.Stat(f); err != nil {
-		return nil, err
-	}
-	return ioutil.ReadFile(f)
+type Reader interface {
+	Read(io.Reader) ([]Reading, error)
 }
 
-func equalFileContents(f1, f2 string) bool {
-	x1, err := fileContents(f1)
-	if err != nil {
-		return false
-	}
-	x2, err := fileContents(f2)
-	if err != nil {
-		return false
-	}
-	return bytes.Equal(x1, x2)
+func Read(r io.Reader, rd Reader) ([]Reading, error) {
+	return rd.Read(r)
 }
 
-type Storage struct {
-	Template     *template.Template
-	DecimalPlace int
-}
-
-func NewStorage(tmpl string, dp int) (*Storage, error) {
-	t, err := template.New("readings").Funcs(template.FuncMap{
-		"Year": func(t time.Time) string {
-			return t.Format("2006")
-		},
-		"Month": func(t time.Time) string {
-			return t.Format("01")
-		},
-		"Day": func(t time.Time) string {
-			return t.Format("02")
-		},
-		"Doy": func(t time.Time) string {
-			return fmt.Sprintf("%03d", t.YearDay())
-		},
-		"Hour": func(t time.Time) string {
-			return t.Format("15")
-		},
-		"Minute": func(t time.Time) string {
-			return t.Format("04")
-		},
-		"Second": func(t time.Time) string {
-			return t.Format("05")
-		},
-	}).Parse(tmpl)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Storage{
-		Template:     t,
-		DecimalPlace: dp,
-	}, nil
-}
-
-func (s Storage) Store(dir string, readings []Reading) error {
-
-	// map readings into files
-	files := make(map[string][]Reading)
-	for _, v := range readings {
-		b := new(bytes.Buffer)
-		if err := s.Template.Execute(b, v); err != nil {
-			return err
-		}
-		files[b.String()] = append(files[b.String()], v)
-	}
-
-	// update each file
-	for k, v := range files {
-		path := filepath.Join(dir, k)
-
-		m := Readings([]Reading{}).Merge(v)
-
-		// import any existing readings
-		if _, err := os.Stat(path); err == nil {
-			if r, err := s.ReadFile(path); err != nil {
-				m = Readings(m).Merge(r)
-			}
-		}
-
-		// get them in order
-		sort.Sort(Readings(m))
-
-		// write out the readings if they're different
-		if err := s.WriteFile(path, m); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (s Storage) ReadFile(path string) ([]Reading, error) {
+func ReadFile(path string, rd Reader) ([]Reading, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	var r Readings
-	if err := r.Read(f); err != nil {
-		return nil, err
-	}
-
-	return r, nil
+	return rd.Read(f)
 }
 
-func (s Storage) WriteFile(path string, readings []Reading) error {
+type Writer interface {
+	Write(io.Writer, []Reading) error
+}
 
-	// write to a temporary file first and then rename it
+func Write(w io.Writer, wr Writer, readings []Reading) error {
+	return wr.Write(w, readings)
+}
+
+func WriteFile(path string, wr Writer, readings []Reading) error {
+
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
 	defer os.Chmod(path, 0644)
 
-	f, err := ioutil.TempFile(filepath.Dir(path), tmpReadingPrefix)
+	f, err := ioutil.TempFile(filepath.Dir(path), ".xxxx")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(f.Name())
-	if err := Readings(readings).Write(f, s.DecimalPlace); err != nil {
+
+	if err := wr.Write(f, readings); err != nil {
 		return err
 	}
 	if err := f.Close(); err != nil {
 		return err
 	}
-	if !equalFileContents(f.Name(), path) {
-		if err := os.Rename(f.Name(), path); err != nil {
+	if err := os.Rename(f.Name(), path); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+type ReadWriter interface {
+	Reader
+	Writer
+}
+
+func ReadWriteFile(path string, rw ReadWriter, readings []Reading) error {
+	if _, err := os.Stat(path); err != nil {
+		return WriteFile(path, rw, readings)
+	}
+
+	raw, err := ioutil.ReadFile(path)
+	if err != nil {
+		return WriteFile(path, rw, readings)
+	}
+
+	existing, err := Read(bytes.NewBuffer(raw), rw)
+	if err != nil {
+		return WriteFile(path, rw, readings)
+	}
+
+	obs := Merge(existing, readings)
+
+	var buf bytes.Buffer
+	if err := Write(&buf, rw, obs); err != nil {
+		return WriteFile(path, rw, readings)
+	}
+
+	if !bytes.Equal(raw, buf.Bytes()) {
+		return WriteFile(path, rw, readings)
+	}
+
+	return nil
+}
+
+func Store(dir string, rw ReadWriter, filename func(Reading) (string, error), readings []Reading) error {
+
+	// map readings into files
+	files := make(map[string][]Reading)
+	for _, r := range readings {
+		n, err := filename(r)
+		if err != nil {
+			return err
+		}
+		files[n] = append(files[n], r)
+	}
+
+	// update each file
+	for k, rr := range files {
+		if err := ReadWriteFile(filepath.Join(dir, k), rw, rr); err != nil {
 			return err
 		}
 	}

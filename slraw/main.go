@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/GeoNet/slink"
-	"github.com/ozym/geomag"
+	"github.com/ozym/raw"
 )
 
 func main() {
@@ -21,6 +21,8 @@ func main() {
 	flag.StringVar(&tmpl, "template", "{{Year .Epoch}}/{{Year .Epoch}}.{{Doy .Epoch}}/{{Year .Epoch}}.{{Doy .Epoch}}.{{Hour .Epoch}}.{{.Source}}.csv", "file name template")
 	var scale float64
 	flag.Float64Var(&scale, "scale", 1.0, "stream scale factor")
+	var offset float64
+	flag.Float64Var(&offset, "offset", 0.0, "stream offset factor")
 	var dp int
 	flag.IntVar(&dp, "dp", -1, "decimal places")
 
@@ -47,12 +49,7 @@ func main() {
 
 	flag.Parse()
 
-	mseed, err := geomag.NewMSeed(scale)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	storage, err := geomag.NewStorage(tmpl, dp)
+	storage, err := raw.NewTemplate(tmpl)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -99,7 +96,7 @@ func main() {
 	// periodicly flush the buffers
 	tock := time.NewTicker(flush)
 
-	var readings []geomag.Reading
+	var readings []raw.Reading
 
 	log.Printf("collecting: %s (%s) :: %s", streams, selectors, server)
 
@@ -117,8 +114,8 @@ loop:
 		case <-tock.C:
 			if len(readings) > 0 {
 				log.Printf("flush: %d records", len(readings))
-				if err := storage.Store(dir, readings); err != nil {
-					log.Fatal(err)
+				if err := raw.Store(dir, raw.NewCsv(dp), storage.Execute, readings); err != nil {
+					log.Fatalf("unable to store readings: %v", err)
 				}
 				readings = nil
 			}
@@ -134,9 +131,9 @@ loop:
 			case slink.SLPACKET:
 				// check just in case we're shutting down
 				if p != nil && p.PacketType() == slink.SLDATA {
-					r, err := mseed.DecodeBuffer(p.GetMSRecord())
+					r, err := raw.DecodeMSeedBuffer(p.GetMSRecord(), offset, scale)
 					if err != nil {
-						log.Fatal(err)
+						log.Fatalf("unable to decode mseed buffer: %v", err)
 					}
 					readings = append(readings, r...)
 				}
@@ -148,8 +145,8 @@ loop:
 
 	if len(readings) > 0 {
 		log.Printf("flush: %d records", len(readings))
-		if err := storage.Store(dir, readings); err != nil {
-			log.Fatal(err)
+		if err := raw.Store(dir, raw.NewCsv(dp), storage.Execute, readings); err != nil {
+			log.Fatalf("unable to store readings: %v", err)
 		}
 	}
 
